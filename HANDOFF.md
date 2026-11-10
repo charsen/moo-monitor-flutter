@@ -1,6 +1,14 @@
 # Flutter 监控接入记录
 
-本轮新建独立 SDK，并接入同级 Flutter host；共用现有反馈 token，不变更宿主版本。三仓实现使用任务分支 `feat-monitor-flutter`，提交与本地合并状态以 Git 引用为准；本轮不含推送。原生 SDK 仓仅作参考，没有修改。
+本轮新建独立 SDK，并接入同级 Flutter host；共用现有反馈 token，不变更宿主版本。初版三仓实现使用任务分支 `feat-monitor-flutter`；初版未推送，本次 SDK 双源交付及合并状态以 Git 引用为准。原生 SDK 仓仅作参考，没有修改。
+
+## 后续修订：单一 Flutter 共享 token（2026-11-10）
+
+- 用户确认 Android/iOS 的反馈与监控共用一枚 token；当前文件中的光语 App 凭据已统一为 Flutter 共享标签。旧工具仍按两个 OS 标题读取，实际两个目标均失败；已改为唯一标签入口，不再回退到旧平台分段。
+- `--platform` 只保留构建目标兼容与 Gradle/iOS 冲突校验，不参与凭据选择；JSON 输出无需该参数。iOS 调用同步移除多余平台参数。业务端继续从同一 ClientBuildConfig.token 读取。
+- 反馈由 AppRuntimeInfo、监控由 AppMonitor 检测实际 OS 并发送 platform；文档、构建指引和云端契约已统一，未改 Dart 业务实现或后端处理逻辑。
+- 定向工具用例从失败6项到全部8项通过（含两端同值、旧分段拒绝、歧义拒绝、环境覆盖和保留其他define），日志 `/tmp/flutter-shared-token-{red,green}.log`。仅对本次 Python/shell/文档做必要检查，不重复初版 Dart/后端全量测试；未出包、操作设备或发送生产请求。
+- 本次修订使用 `fix-flutter-shared-client-token`，SDK 同一任务分支分别合入 `dev`、`main`；提交、合并与双源同步状态以本地及远端 Git 引用为准。源码双源为 Gitee `origin` 与 GitHub `github`，仅推送 `main`、`dev`，不增加版本或 tag。下文为初版实现与测试证据，初版5项token工具结果不代表当前读取口径。
 
 ## 已实现
 
@@ -43,6 +51,6 @@ host 原始 HEAD 为 `f545959`；在 ignored `build/host-baseline/` 导出其 co
 
 ## 交付与边界
 
-新 SDK 初始版本0.1.0；host 保持0.0.3+9，没有新 APK/IPA、签名/安装/上传/部署或 Git 远端创建。Git 本地交付状态以分支实际引用为准，不含推送。cloud 本轮只改契约文档和测试，未改生产处理代码。构建工具和接线见 [host说明](../light-language-frontend/docs/APP-MONITOR.md) 与 [BUILD](../light-language-frontend/docs/BUILD.md)。
+新 SDK 初始版本0.1.0；host 保持0.0.3+9，没有新 APK/IPA、签名/安装/上传/部署。初版仅作本地 Git 交付；后续按用户指令建立 SDK 双源并推送，交付状态以两端分支实际引用为准。cloud 本轮只改契约文档和测试，未改生产处理代码。构建工具和接线见 [host说明](../light-language-frontend/docs/APP-MONITOR.md) 与 [BUILD](../light-language-frontend/docs/BUILD.md)。
 
 未执行设备/E2E、原生Java/NSException/信号、ANR、实际OOM/watchdog、AOT混淆还原、长后台调度；Application Support备份排除仍需原生适配。公开 API 不能替代这些未实现能力，后续事项见 [TODOS](TODOS.md)。

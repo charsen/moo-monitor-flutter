@@ -9,6 +9,8 @@
 
 ## 队列与网络
 
+同一个 Flutter App 在 Android/iOS 共用一枚反馈/监控 token，身份认证与平台分类独立。SDK 按 `MonitorConfig.platform` 写入每条记录；光语宿主自动检测手机运行环境后填 `android` 或 `ios`。反馈同样由客户端检测后发送 `platform`，后端各自校验并入库，不按 token 识别平台。构建的统一入口与标签只在 host BUILD 维护，SDK 不另建按 OS 取凭据的规则。
+
 独立 Application Support 子目录，单个 root isolate 持有。事件同步追加并 flush，普通追加缓存条数/字节；最多 200 条 / 2 MB、单条 256 KB，轮转原子替换并保留较新记录。恢复坏行与半行，读失败不覆盖源；无本地指纹合并。发送冻结原始行收据，只确认对应条目，允许发送期间追加/轮转。计数与丢弃数只反映当前进程可观察范围。
 
 随机 UUID 生成安装身份并 SHA-256；不读取宿主安装身份、IDFA/IDFV/硬件 serial。会话另用 UUID。队列内保留事件原始时间/构建与 event_id，补发不重新标注；服务端去重仍只有有限窗口。
