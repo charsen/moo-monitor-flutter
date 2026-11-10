@@ -69,7 +69,7 @@ class MonitorClient {
       Map<String, Object?> extras = const {}}) {
     if (!active || !['handled', 'low_memory'].contains(kind)) return;
     try {
-      final trace = Redactor.truncate(stack.toString(), 32768);
+      final trace = Redactor.scrub(stack.toString(), bytes: 32768);
       String text;
       try {
         text = message ?? error.toString();
@@ -96,7 +96,7 @@ class MonitorClient {
         'exception': {
           'name': Redactor.scrub(error.runtimeType.toString(), bytes: 192),
           'message': Redactor.scrub(text),
-          'stack': Redactor.scrub(trace, bytes: 32768)
+          'stack': trace
         },
         'frames': Redactor.frames(trace, inAppPackages: config.inAppPackages),
         'device': {

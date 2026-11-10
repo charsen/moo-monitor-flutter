@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moo_monitor_flutter/src/redactor.dart';
 
@@ -8,6 +9,36 @@ class PrivateObject {
 }
 
 void main() {
+  test('shared cross SDK synthetic corpus stays safe and readable', () {
+    final fixture = jsonDecode(
+            File('test/fixtures/cross-sdk-redaction.json').readAsStringSync())
+        as Map;
+    for (final row in fixture['cases'] as List) {
+      final out = Redactor.scrub(row['input'] as String);
+      for (final secret in row['forbidden'] as List) {
+        expect(out, isNot(contains(secret as String)),
+            reason: row['name'] as String);
+      }
+      expect(out, contains(row['keep'] as String),
+          reason: row['name'] as String);
+    }
+  });
+  test(
+      'redacts complete credentials before output limits with bounded scanning',
+      () {
+    final jwt = 'eyJ${'A' * 40000}.payload.signature';
+    expect(Redactor.scrub(jwt), isNot(contains('eyJAAA')));
+    expect(Redactor.scrub(jwt, bytes: 64), isNot(contains('eyJAAA')));
+    expect(Redactor.payload({'note': jwt, 'key $jwt': 'ok'}).toString(),
+        isNot(contains('eyJAAA')));
+    expect(Redactor.scrub('x' * 65537), '[truncated]');
+  });
+  test('escaped quoted credentials do not expose their tail', () {
+    final out = Redactor.scrub(
+        r'password="first \"second\" final-secret" keep=visible');
+    expect(out, isNot(contains('final-secret')));
+    expect(out, contains('keep=visible'));
+  });
   test('short quoted prefixed credentials private filenames URLs are removed',
       () {
     final text = Redactor.scrub(

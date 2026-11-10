@@ -2,7 +2,7 @@ import 'dart:convert';
 
 class Redactor {
   static final _secrets = RegExp(
-    r'''["']?[\w-]*(?:token|secret|password|passwd|pwd|authorization|cookie|api[_-]?key)[\w-]*["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;&}\]]+)''',
+    r'''["']?[\w-]*(?:token|secret|password|passwd|pwd|authorization|cookie|api[_-]?key)[\w-]*["']?\s*[:=]\s*(?:"(?:[^"\\\r\n]|\\.)*(?:"|$)|'(?:[^'\\\r\n]|\\.)*(?:'|$)|[^\s,;&}\]]+)''',
     caseSensitive: false,
   );
   static final _secretKey = RegExp(
@@ -29,7 +29,15 @@ class Redactor {
   }
 
   static String scrub(String text, {int bytes = 8192}) {
-    var value = truncate(text, bytes);
+    var value = text;
+    if (text.length > 65536) {
+      // Retain complete stack lines; omit the line crossing the scan boundary.
+      final prefix = text.substring(0, 65536);
+      final boundary = prefix.lastIndexOf('\n');
+      value = boundary < 0
+          ? '[truncated]'
+          : '${prefix.substring(0, boundary)}\n[truncated]';
+    }
     value = value
         .replaceAll(_secrets, '[credential]')
         .replaceAll(_bearer, 'Bearer ***')

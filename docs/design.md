@@ -21,6 +21,8 @@
 
 先按总节点/深度/条目/字节预算遍历 extras，未知对象不调用 toString；消息、栈、payload 分别限制 8 KB / 32 KB / 8 KB，识别常见凭据、URL、私有路径。screen 只接受代码标识。光语只上报异常类型、Dart 源码栈与固定诊断消息，不发送原业务描述或 Flutter context 文案。
 
+文本扫描最多65,536个UTF-16单元；超限只保留预算内完整行，截口整行省略，无完整行用占位符。预算内先识别完整JWT/带转义引号凭据，再限制字段字节；capture直接清洗原始栈，frames使用同一份安全栈。不能先截断栈或payload键值，再指望完整凭据正则识别残段。
+
 Debug VM 栈可解析 package URI、函数、行列；绝对路径只保留代码文件名。AOT 混淆栈保留脱敏原文，未提供 split-debug-info 符号化，不能伪造源码行号。Web/桌面、原生 crash/ANR、OOM/watchdog/hang、脏退出推断、多 isolate 共写文件和系统后台 lease 不在首版能力内。Application Support 备份排除尚无原生适配，不宣称跨重装安装身份永久稳定。
 
 ## 依据与验证

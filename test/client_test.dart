@@ -79,6 +79,18 @@ void main() {
     expect(events.map((x) => x['event_id']).toSet().length, 180);
     expect(jsonEncode(events), isNot(contains('tiny')));
   });
+  test(
+      'capture cleans the original stack before truncating and deriving frames',
+      () {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    final jwt = 'eyJ${'A' * 40000}.payload.signature';
+    client.capture(
+        StateError('fixture'), StackTrace.fromString('failure $jwt'));
+    final record = client.store.pending.single.record;
+    expect(jsonEncode(record), isNot(contains('eyJAAA')));
+    expect(utf8.encode((record['exception'] as Map)['stack'] as String).length,
+        lessThanOrEqualTo(32768));
+  });
   test('concurrent flush shares a request and new append survives receipt',
       () async {
     final gate = Completer<HttpResult>();
