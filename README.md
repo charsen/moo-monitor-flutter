@@ -23,4 +23,4 @@ token 只用于项目与能力认证。SDK 每条记录携带 `MonitorConfig.pla
 
 空 token 不安装、不读写目录、不联网。首次安装/运行需宿主已初始化 binding。只传固定 screen 标识，不传路由参数、书名、内容、账号或凭据。消息模式脱敏不等于理解任意自然语言，宿主应传固定诊断描述。
 
-详见 [设计](docs/design.md)、[验证记录](HANDOFF.md)；移动上报唯一契约在同级 `moo-scaffold-cloud/docs/app-monitor.md`。源码同时维护于 [Gitee](https://gitee.com/charsen/moo-monitor-flutter)（需仓库访问权限）和 [GitHub](https://github.com/charsen/moo-monitor-flutter)，同一分支直接推送到两端；不发布到 pub.dev，host 使用 sibling path 依赖。
+详见 [设计](docs/design.md)、[验证记录](HANDOFF.md)；移动上报唯一契约在同级 `moo-scaffold-cloud/docs/app-monitor.md`。源码同时维护于 [Gitee](https://gitee.com/charsen/moo-monitor-flutter) 和 [GitHub](https://github.com/charsen/moo-monitor-flutter)，两端均为公开仓库，同一分支直接推送到两端；不发布到 pub.dev，host 使用 sibling path 依赖。
