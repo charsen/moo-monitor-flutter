@@ -23,6 +23,7 @@ class MonitorClient {
   MonitorClient(this.config, this.store,
       {MonitorTransport? transport,
       DateTime Function()? now,
+      this.memorySnapshot,
       this.automatic = true})
       : now = now ?? DateTime.now,
         transport = transport ??
@@ -49,6 +50,7 @@ class MonitorClient {
   final MonitorTransport transport;
   final DateTime Function() now;
   final bool automatic;
+  final Map<String, int> Function()? memorySnapshot;
   late final String identity, installId;
   final String sessionId = newEventId();
   final _uptime = Stopwatch()..start();
@@ -150,10 +152,28 @@ class MonitorClient {
       return;
     }
     _lastMemoryWarning = elapsed;
+    final metrics = <String, Object?>{};
+    // Sample only after throttling. A failed sampler must never suppress the
+    // warning or retain application objects during an already pressured moment.
+    try {
+      final snapshot = memorySnapshot?.call() ?? const <String, int>{};
+      for (final key in const [
+        'image_cache_bytes',
+        'image_cache_count',
+        'image_cache_live_count',
+        'image_cache_pending_count',
+        'process_rss_bytes',
+        'process_peak_rss_bytes'
+      ]) {
+        final value = snapshot[key];
+        if (value != null && value >= 0) metrics[key] = value;
+      }
+    } catch (_) {/* keep the warning without optional measurements */}
     capture(const _MemoryWarning(), StackTrace.empty,
         message: 'Memory warning',
         source: 'memory_warning',
-        kind: 'low_memory');
+        kind: 'low_memory',
+        extras: metrics);
     // The event is a memory warning, never evidence of an OOM process kill.
   }
 

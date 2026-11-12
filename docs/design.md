@@ -36,3 +36,12 @@ Debug VM 栈可解析 package URI、函数、行列；绝对路径只保留代�
 - [Isolate.addErrorListener](https://api.dart.dev/dart-isolate/Isolate/addErrorListener.html)
 
 SDK 单测覆盖队列/回执/退避/脱敏/处理链，真实 loopback HTTP 覆盖传输；受影响 host 包按其规则执行单测与分析。设备/E2E 不在本次新 SDK 的默认授权中。
+
+
+## 内存压力的数字快照
+
+低内存事件保持 `kind=low_memory`、`source=memory_warning`，不会推断为进程OOM。原有每进程一小时节流先执行，只有被接受的警告才采样一次，不增加轮询或后台任务。
+
+固定数值字段为 `image_cache_bytes`、`image_cache_count`、`image_cache_live_count`、`image_cache_pending_count`、`process_rss_bytes`、`process_peak_rss_bytes`。只接受非负整数，未知键不进入事件；不读取缓存键、图片URL、路由参数、账户或图片内容。进程指标不可用时省略；采样异常仍保留原内存警告。字段放入既有有界payload扩展，不修改信封或公共门面。
+
+Flutter先清理常规图片缓存再通知WidgetsBindingObserver，因此缓存字段是清理后的快照；live images仍可能被可见/保留组件持有。RSS是采样时进程常驻内存，peak RSS由运行时提供，二者不是Dart堆上限或系统Jetsam证据，也不代表警告发生前的图片缓存峰值。采样测试包含真实binding回调、节流、未知键/负数排除和异常隔离；具体设备行为仍需profile验证。

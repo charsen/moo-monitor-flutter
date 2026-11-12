@@ -47,13 +47,16 @@ void main() {
     dir.deleteSync(recursive: true);
   });
   MonitorClient make(FakeTransport transport,
-      {String token = 'fixture', int maxRecords = 200}) {
+      {String token = 'fixture',
+      int maxRecords = 200,
+      Map<String, int> Function()? snapshot}) {
     final client = MonitorClient(
         MonitorConfig(token: token, app: 'fixture', platform: 'android'),
         EventStore(dir, maxRecords: maxRecords),
         transport: transport,
         now: () => now,
-        automatic: false);
+        automatic: false,
+        memorySnapshot: snapshot);
     clients.add(client);
     return client;
   }
@@ -218,6 +221,41 @@ void main() {
     final next = make(FakeTransport((r) async => receipt(r)));
     expect(next.installId, client.installId);
     expect(next.sessionId, isNot(client.sessionId));
+  });
+  test(
+      'memory warnings sample fixed numeric metrics once and never private keys',
+      () {
+    var calls = 0;
+    final client = make(FakeTransport((r) async => receipt(r)), snapshot: () {
+      calls++;
+      return {
+        'image_cache_bytes': 1024,
+        'image_cache_live_count': 3,
+        'process_rss_bytes': 123456,
+        'process_peak_rss_bytes': 234567,
+        'image_cache_pending_count': -1,
+        'private-book': 99
+      };
+    });
+    client.memoryWarning();
+    client.memoryWarning();
+    expect(calls, 1);
+    final payload = client.store.pending.single.record['payload'] as Map;
+    expect(payload['image_cache_bytes'], 1024);
+    expect(payload['image_cache_live_count'], 3);
+    expect(payload['process_rss_bytes'], 123456);
+    expect(payload['process_peak_rss_bytes'], 234567);
+    expect(payload.containsKey('private-book'), isFalse);
+    expect(payload.containsKey('image_cache_pending_count'), isFalse);
+    expect(client.store.pending.single.record['kind'], 'low_memory');
+  });
+  test('a failed memory sampler still records the warning', () {
+    final client = make(FakeTransport((r) async => receipt(r)),
+        snapshot: () => throw StateError('private sampling failure'));
+    client.memoryWarning();
+    final record = client.store.pending.single.record;
+    expect(record['kind'], 'low_memory');
+    expect(jsonEncode(record), isNot(contains('private sampling failure')));
   });
   test(
       'reserved runtime metadata survives oversized extras and cannot be forged',

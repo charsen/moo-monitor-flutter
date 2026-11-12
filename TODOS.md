@@ -1,5 +1,7 @@
 # TODOS
 
+- [ ] 在目标Android/iOS设备复核内存压力数字快照与profile曲线、后台转前台及可见/保留图片的对应关系；组件测试不替代设备RSS观测。
+
 - [ ] 定向真机采集、离线重启补发、撤权及设备生命周期验证；未授权前不启动设备/E2E。
 - [ ] 原生 Android/iOS 适配复用既有 SDK，明确双队列去重和身份后再接入；不在 Dart 捕获原生信号。
 - [ ] AOT split-debug-info 符号还原、系统后台机会、Application Support 备份排除。

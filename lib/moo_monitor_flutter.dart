@@ -6,6 +6,7 @@ import 'dart:isolate';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' as painting;
 import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -45,7 +46,7 @@ class MooMonitor {
       final store = EventStore(base,
           maxRecords: config.maxRecords, maxBytes: config.maxBytes);
       if (!store.readable) return false;
-      _client = MonitorClient(config, store);
+      _client = MonitorClient(config, store, memorySnapshot: _memorySnapshot);
       if (!installed) return false;
       if (hooks) {
         _previousFlutter = FlutterError.onError;
@@ -89,6 +90,26 @@ class MooMonitor {
   }
 
   static void screen(String name) => _client?.screen(name);
+  static Map<String, int> _memorySnapshot() {
+    final cache = painting.PaintingBinding.instance.imageCache;
+    // Flutter has already cleared its normal cache before notifying observers;
+    // live images can remain held by visible/retained widgets. This is a snapshot,
+    // not the memory peak at which the system decided to send its warning.
+    final values = <String, int>{
+      'image_cache_bytes': cache.currentSizeBytes,
+      'image_cache_count': cache.currentSize,
+      'image_cache_live_count': cache.liveImageCount,
+      'image_cache_pending_count': cache.pendingImageCount,
+    };
+    try {
+      values['process_rss_bytes'] = ProcessInfo.currentRss;
+      values['process_peak_rss_bytes'] = ProcessInfo.maxRss;
+    } catch (_) {
+      /* unsupported process metrics must not hide cache measurements */
+    }
+    return values;
+  }
+
   static Future<void> flush() async {
     await _client?.flush();
   }

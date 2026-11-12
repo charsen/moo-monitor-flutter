@@ -69,6 +69,26 @@ void main() {
     await MooMonitor.close();
     expect(identical(FlutterError.onError, newer), isTrue);
   });
+  test('real memory-pressure observer includes only numeric runtime snapshots',
+      () async {
+    await MooMonitor.install(config, directory: dir, installHandlers: false);
+    WidgetsBinding.instance.handleMemoryPressure();
+    final records = EventStore(dir).pending;
+    expect(records.length, 1);
+    final record = records.single.record, payload = record['payload'] as Map;
+    expect(record['kind'], 'low_memory');
+    for (final key in [
+      'image_cache_bytes',
+      'image_cache_count',
+      'image_cache_live_count',
+      'image_cache_pending_count'
+    ]) {
+      expect(payload[key], isA<int>());
+      expect(payload[key] as int, greaterThanOrEqualTo(0));
+    }
+    expect(payload['process_rss_bytes'], isA<int>());
+    expect(payload['process_peak_rss_bytes'], isA<int>());
+  });
   test('empty token does not create directory or install handlers', () async {
     final absent = Directory('${dir.path}/absent');
     final original = FlutterError.onError;
