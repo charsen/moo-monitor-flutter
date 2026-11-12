@@ -45,3 +45,11 @@ SDK 单测覆盖队列/回执/退避/脱敏/处理链，真实 loopback HTTP 覆
 固定数值字段为 `image_cache_bytes`、`image_cache_count`、`image_cache_live_count`、`image_cache_pending_count`、`process_rss_bytes`、`process_peak_rss_bytes`。只接受非负整数，未知键不进入事件；不读取缓存键、图片URL、路由参数、账户或图片内容。进程指标不可用时省略；采样异常仍保留原内存警告。字段放入既有有界payload扩展，不修改信封或公共门面。
 
 Flutter先清理常规图片缓存再通知WidgetsBindingObserver，因此缓存字段是清理后的快照；live images仍可能被可见/保留组件持有。RSS是采样时进程常驻内存，peak RSS由运行时提供，二者不是Dart堆上限或系统Jetsam证据，也不代表警告发生前的图片缓存峰值。采样测试包含真实binding回调、节流、未知键/负数排除和异常隔离；具体设备行为仍需profile验证。
+
+## 固定代码操作轨迹（2026-11-12）
+
+`MooMonitor.breadcrumb(type, name)`只收固定代码标签：type为1–16个小写ASCII字母/数字/下划线、以字母开头；name为最多64字节、2–6段点连接的同类标识符。整串匹配且脱敏不改变原值；URL、空白/换行、数字ID段、凭据及超长值丢弃。不能将书名/账号等业务数据处理成标识符后传入。
+
+ListQueue保持最多30条t/type/name，相邻同type/name合并并保留首次时间，采集事件时复制快照。无独立事件、无单独落盘或发送任务；只有后续被接受的事件才携带轨迹。关闭/撤权/未安装时无效。不自动关联child isolate的业务上下文。
+
+参考[Sentry Dart Scope](https://github.com/getsentry/sentry-dart/blob/f680659cfd1471adab34ccc2ba1e43e434ee6ec2/packages/dart/lib/src/scope.dart)的有界Queue与采集故障隔离，保持同步轻量入口；不引入新zone或全局transaction scope，不采请求参数/headers/body，不增加原生crash能力。

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -20,6 +21,9 @@ String newEventId() {
 }
 
 class MonitorClient {
+  static final _breadcrumbType = RegExp(r'^[a-z][a-z0-9_]*$');
+  static final _breadcrumbName =
+      RegExp(r'^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,5}$');
   MonitorClient(this.config, this.store,
       {MonitorTransport? transport,
       DateTime Function()? now,
@@ -54,7 +58,7 @@ class MonitorClient {
   late final String identity, installId;
   final String sessionId = newEventId();
   final _uptime = Stopwatch()..start();
-  final _breadcrumbs = <Map<String, Object>>[];
+  final _breadcrumbs = ListQueue<Map<String, Object>>(30);
   bool disabled = false, _closed = false, _exhausted = false;
   bool? _foreground;
   String? _screen;
@@ -178,9 +182,29 @@ class MonitorClient {
   }
 
   void _breadcrumb(String type, String name) {
+    // Repeated sync requests should not evict the preceding useful transitions.
+    if (_breadcrumbs.isNotEmpty &&
+        _breadcrumbs.last['type'] == type &&
+        _breadcrumbs.last['name'] == name) {
+      return;
+    }
     _breadcrumbs.add(
         {'t': now().toUtc().toIso8601String(), 'type': type, 'name': name});
-    if (_breadcrumbs.length > 30) _breadcrumbs.removeAt(0);
+    if (_breadcrumbs.length > 30) _breadcrumbs.removeFirst();
+  }
+
+  void breadcrumb(String type, String name) {
+    if (!active ||
+        type.length > 16 ||
+        name.length > 64 ||
+        _breadcrumbType.stringMatch(type) != type ||
+        _breadcrumbName.stringMatch(name) != name ||
+        Redactor.scrub(name) != name) {
+      return;
+    }
+    try {
+      _breadcrumb(type, name);
+    } catch (_) {/* diagnostics cannot affect host work */}
   }
 
   void schedule(Duration delay) {

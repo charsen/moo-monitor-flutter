@@ -70,6 +70,41 @@ void main() {
     }
   }
 
+  test('cross-platform breadcrumbs reject request data and credentials', () {
+    final rows = jsonDecode(
+            File('test/fixtures/cross-sdk-breadcrumbs.json').readAsStringSync())
+        as List;
+    for (final row in rows.cast<Map>()) {
+      final client = make(FakeTransport((r) async => receipt(r)));
+      client.breadcrumb(row['type'] as String, row['name'] as String);
+      client.capture(StateError('fixture'), StackTrace.empty);
+      final crumbs = client.store.pending.last.record['breadcrumbs'] as List;
+      expect(crumbs.length, row['accepted'] == true ? 1 : 0);
+    }
+  });
+  test('repeated sync requests keep earlier transitions and bounded snapshots',
+      () {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    client.breadcrumb('sync', 'reader.identity.ok');
+    for (var i = 0; i < 1000; i++) {
+      client.breadcrumb('sync', 'reader.changes.timeout');
+    }
+    expect(client.store.pending, isEmpty);
+    client.capture(StateError('first'), StackTrace.empty);
+    final frozen = client.store.pending.single.record['breadcrumbs'] as List;
+    expect(frozen.map((c) => (c as Map)['name']),
+        ['reader.identity.ok', 'reader.changes.timeout']);
+    for (var i = 0; i < 35; i++) {
+      client.breadcrumb('sync', 'reader.phase_$i.ok');
+    }
+    client.capture(StateError('second'), StackTrace.empty);
+    final tail = client.store.pending.last.record['breadcrumbs'] as List;
+    expect(tail.length, 30);
+    expect((tail.first as Map)['name'], 'reader.phase_5.ok');
+    expect((tail.last as Map)['name'], 'reader.phase_34.ok');
+    expect(client.store.pending.first.record['breadcrumbs'], frozen);
+  });
+
   test('180 distinct events drain beyond three bounded batches', () async {
     final transport = FakeTransport((r) async => receipt(r));
     final client = make(transport);

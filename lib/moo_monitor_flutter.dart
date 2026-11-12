@@ -90,6 +90,10 @@ class MooMonitor {
   }
 
   static void screen(String name) => _client?.screen(name);
+
+  /// Fixed code labels only (sync / reader.identity.ok), never URLs or content.
+  static void breadcrumb(String type, String name) =>
+      _client?.breadcrumb(type, name);
   static Map<String, int> _memorySnapshot() {
     final cache = painting.PaintingBinding.instance.imageCache;
     // Flutter has already cleared its normal cache before notifying observers;

@@ -32,6 +32,21 @@ void main() {
     PlatformDispatcher.instance.onError = oldPlatform;
     dir.deleteSync(recursive: true);
   });
+  test(
+      'public breadcrumb facade attaches transitions without an event of its own',
+      () async {
+    MooMonitor.breadcrumb('sync', 'reader.identity.ok');
+    await MooMonitor.install(config, directory: dir, installHandlers: false);
+    for (var i = 0; i < 1000; i++) {
+      MooMonitor.breadcrumb('sync', 'reader.identity.ok');
+    }
+    expect(EventStore(dir).pending, isEmpty);
+    MooMonitor.capture(StateError('fixture'), StackTrace.empty,
+        message: 'fixture');
+    final crumbs = EventStore(dir).pending.single.record['breadcrumbs'] as List;
+    expect(crumbs.length, 1);
+    expect((crumbs.single as Map)['name'], 'reader.identity.ok');
+  });
   test('framework and root hooks preserve original handler and boolean result',
       () async {
     var framework = 0, platform = 0;
