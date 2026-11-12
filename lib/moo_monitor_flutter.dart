@@ -145,6 +145,9 @@ class MooMonitor {
   }
 
   static Future<void> close() async {
+    // Stop collection before yielding, including when a host getter calls close
+    // from inside capture. An in-flight install still needs the cleanup below.
+    _client?.close();
     await _installing;
     for (final isolate in _isolates.keys.toList()) {
       stopObservingIsolate(isolate);

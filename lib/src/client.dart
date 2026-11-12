@@ -60,6 +60,7 @@ class MonitorClient {
   final _uptime = Stopwatch()..start();
   final _breadcrumbs = ListQueue<Map<String, Object>>(30);
   bool disabled = false, _closed = false, _exhausted = false;
+  bool _capturing = false;
   bool? _foreground;
   String? _screen;
   int? _lastMemoryWarning;
@@ -73,7 +74,13 @@ class MonitorClient {
       String source = 'capture',
       String kind = 'handled',
       Map<String, Object?> extras = const {}}) {
-    if (!active || !['handled', 'low_memory'].contains(kind)) return;
+    if (!active || _capturing || !['handled', 'low_memory'].contains(kind)) {
+      return;
+    }
+    // toString/StackTrace/custom Map access can synchronously re-enter capture.
+    // This root-isolate gate ends before the next attempt; it is not object/hash
+    // deduplication, and deliberately emits no diagnostic log on the drop path.
+    _capturing = true;
     try {
       final trace = Redactor.scrub(stack.toString(), bytes: 32768);
       String text;
@@ -126,10 +133,15 @@ class MonitorClient {
             _breadcrumbs.map((entry) => Map<String, Object>.of(entry)).toList(),
         'payload': Redactor.payload(payload, dropped: store.dropped),
       };
+      // Host getters above may synchronously close this client. Check at the
+      // commit boundary too; no other root-isolate task can interleave here.
+      if (!active) return;
       store.append(record);
       schedule(const Duration(seconds: 5));
     } catch (_) {
       store.dropped++;
+    } finally {
+      _capturing = false;
     }
   }
 

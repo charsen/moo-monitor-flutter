@@ -19,6 +19,8 @@
 
 ## 隐私与栈
 
+关闭时公共门面在第一次异步等待之前立即停止当前客户端；若安装仍在进行，等待完成后继续清理处理器和新客户端。同步构造事件期间宿主getter可以调用close，因此追加队列前再次检查active；关闭后丢弃尚未提交的事件，既有队列保留。已在途请求的迟到成功回执不确认旧队列；这些检查不提供任意宿主getter的执行超时。
+
 先按总节点/深度/条目/字节预算遍历 extras，未知对象不调用 toString；消息、栈、payload 分别限制 8 KB / 32 KB / 8 KB，识别常见凭据、URL、私有路径。screen 只接受代码标识。光语只上报异常类型、Dart 源码栈与固定诊断消息，不发送原业务描述或 Flutter context 文案。
 
 文本扫描最多65,536个UTF-16单元；超限只保留预算内完整行，截口整行省略，无完整行用占位符。预算内先识别完整JWT/带转义引号凭据，再限制字段字节；capture直接清洗原始栈，frames使用同一份安全栈。不能先截断栈或payload键值，再指望完整凭据正则识别残段。
@@ -53,3 +55,9 @@ Flutter先清理常规图片缓存再通知WidgetsBindingObserver，因此缓存
 ListQueue保持最多30条t/type/name，相邻同type/name合并并保留首次时间，采集事件时复制快照。无独立事件、无单独落盘或发送任务；只有后续被接受的事件才携带轨迹。关闭/撤权/未安装时无效。不自动关联child isolate的业务上下文。
 
 参考[Sentry Dart Scope](https://github.com/getsentry/sentry-dart/blob/f680659cfd1471adab34ccc2ba1e43e434ee6ec2/packages/dart/lib/src/scope.dart)的有界Queue与采集故障隔离，保持同步轻量入口；不引入新zone或全局transaction scope，不采请求参数/headers/body，不增加原生crash能力。
+
+## 常规采集的重入保护
+
+error.toString、StackTrace.toString及自定义Map枚举会执行宿主代码。capture在这些读取之前进入客户端级同步保护，finally解除；同一root isolate内的嵌套采集静默返回，不打印诊断日志、不增加dropped。实际序列化失败仍按原规则记dropped，之后正常采集可继续。保护没有跨await持有，也不建立新zone或跨isolate状态。
+
+对照[Sentry Dart去重处理器](https://github.com/getsentry/sentry-dart/blob/f680659cfd1471adab34ccc2ba1e43e434ee6ec2/packages/dart/lib/src/deduplication/deduplication_event_processor.dart)后，本库不照搬按对象hash保留历史窗口的方案；一次采集返回后，合法后续调用（含复用同一异常或hash相同的不同异常）继续保留独立event_id/count=1。这里仅防同步重入，不合并业务重试，也不消除先后两个独立hook对同一错误的转发。宿主属性仍同步执行，不是执行超时或沙箱机制。

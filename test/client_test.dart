@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +7,46 @@ import 'package:moo_monitor_flutter/src/client.dart';
 import 'package:moo_monitor_flutter/src/config.dart';
 import 'package:moo_monitor_flutter/src/store.dart';
 import 'package:moo_monitor_flutter/src/transport.dart';
+
+class _ReentrantError implements Exception {
+  _ReentrantError(this.read, {this.text = 'outer'});
+  final void Function() read;
+  final String text;
+  @override
+  int get hashCode => 7;
+  @override
+  bool operator ==(Object other) => identical(this, other);
+  @override
+  String toString() {
+    read();
+    return text;
+  }
+}
+
+class _ReentrantMap extends MapBase<String, Object?> {
+  _ReentrantMap(this.read);
+  final void Function() read;
+  @override
+  Iterable<String> get keys {
+    read();
+    return const ['counter'];
+  }
+
+  @override
+  Object? operator [](Object? key) => key == 'counter' ? 1 : null;
+  @override
+  void operator []=(String key, Object? value) =>
+      throw UnsupportedError('read only');
+  @override
+  void clear() => throw UnsupportedError('read only');
+  @override
+  Object? remove(Object? key) => throw UnsupportedError('read only');
+}
+
+class _ThrowingStack implements StackTrace {
+  @override
+  String toString() => throw StateError('synthetic serialization failure');
+}
 
 class FakeTransport implements MonitorTransport {
   FakeTransport(this.handler);
@@ -70,6 +111,70 @@ void main() {
     }
   }
 
+  test(
+      'recursive descriptions are skipped without suppressing later attempts or hash collisions',
+      () {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    final error = _ReentrantError(
+        () => client.capture(StateError('nested'), StackTrace.empty));
+    client.capture(error, StackTrace.empty);
+    client.capture(error, StackTrace.empty);
+    client.capture(_ReentrantError(() {}, text: 'other'), StackTrace.empty);
+    final rows = client.store.pending.map((r) => r.record).toList();
+    expect(rows.length, 3);
+    expect(rows.map((r) => (r['exception'] as Map)['message']),
+        ['outer', 'outer', 'other']);
+    expect(rows.map((r) => r['event_id']).toSet().length, 3);
+  });
+  test('extras enumeration cannot recursively capture another event', () {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    client.capture(StateError('outer'), StackTrace.empty,
+        kind: 'low_memory',
+        extras: _ReentrantMap(
+            () => client.capture(StateError('nested'), StackTrace.empty)));
+    expect(client.store.pending.length, 1);
+    expect(client.store.pending.single.record['kind'], 'low_memory');
+  });
+  test('capture guard releases after serialization fails', () {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    client.capture(StateError('bad'), _ThrowingStack());
+    expect(client.store.dropped, 1);
+    client.capture(StateError('after'), StackTrace.empty, message: 'after');
+    expect((client.store.pending.single.record['exception'] as Map)['message'],
+        'after');
+  });
+  test('close during error construction cannot append after collection stops',
+      () {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    client.capture(StateError('kept'), StackTrace.empty, message: 'kept');
+    final before = File('${dir.path}/queue.jsonl').readAsBytesSync();
+    client.capture(_ReentrantError(client.close), StackTrace.empty);
+    expect(client.active, isFalse);
+    expect(File('${dir.path}/queue.jsonl').readAsBytesSync(), before);
+    expect(client.store.pending.length, 1);
+  });
+  test('close during extras enumeration keeps prior evidence unchanged', () {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    client.capture(StateError('kept'), StackTrace.empty, message: 'kept');
+    final before = File('${dir.path}/queue.jsonl').readAsBytesSync();
+    client.capture(StateError('discard'), StackTrace.empty,
+        extras: _ReentrantMap(client.close));
+    expect(File('${dir.path}/queue.jsonl').readAsBytesSync(), before);
+    expect(client.store.pending.length, 1);
+  });
+  test('late successful receipt after close cannot acknowledge evidence',
+      () async {
+    final response = Completer<HttpResult>();
+    final client = make(FakeTransport((r) => response.future));
+    capture(client);
+    final before = File('${dir.path}/queue.jsonl').readAsBytesSync();
+    final sending = client.flush();
+    client.close();
+    response.complete(HttpResult(200,
+        utf8.encode('{"ok":true,"results":[{"index":0,"status":"saved"}]}')));
+    await sending;
+    expect(File('${dir.path}/queue.jsonl').readAsBytesSync(), before);
+  });
   test('cross-platform breadcrumbs reject request data and credentials', () {
     final rows = jsonDecode(
             File('test/fixtures/cross-sdk-breadcrumbs.json').readAsStringSync())

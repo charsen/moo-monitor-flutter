@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:isolate';
 import 'dart:ui';
 import 'package:flutter/widgets.dart';
@@ -6,6 +7,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moo_monitor_flutter/moo_monitor_flutter.dart';
 import 'package:moo_monitor_flutter/src/store.dart';
+
+class _ClosingError implements Exception {
+  @override
+  String toString() {
+    unawaited(MooMonitor.close());
+    return 'closed-during-construction';
+  }
+}
 
 void failIsolate(dynamic value) {
   throw StateError('child fixture');
@@ -46,6 +55,12 @@ void main() {
     final crumbs = EventStore(dir).pending.single.record['breadcrumbs'] as List;
     expect(crumbs.length, 1);
     expect((crumbs.single as Map)['name'], 'reader.identity.ok');
+  });
+  test('public close during capture stops before the queue commit', () async {
+    await MooMonitor.install(config, directory: dir, installHandlers: false);
+    MooMonitor.capture(_ClosingError(), StackTrace.empty);
+    expect(MooMonitor.installed, isFalse);
+    expect(EventStore(dir).pending, isEmpty);
   });
   test('framework and root hooks preserve original handler and boolean result',
       () async {
