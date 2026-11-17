@@ -179,7 +179,7 @@ void main() {
     final rows = jsonDecode(
             File('test/fixtures/cross-sdk-breadcrumbs.json').readAsStringSync())
         as List;
-    for (final row in rows.cast<Map>()) {
+    for (final row in rows.cast<Map<String, dynamic>>()) {
       final client = make(FakeTransport((r) async => receipt(r)));
       client.breadcrumb(row['type'] as String, row['name'] as String);
       client.capture(StateError('fixture'), StackTrace.empty);
@@ -421,5 +421,14 @@ void main() {
     }
     expect(transport.requests.length, 6);
     expect(client.store.pending.length, 1);
+  });
+  test('diagnostics exposes bounded counts and last status', () async {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    capture(client, 2);
+    expect(client.diagnostics['pending'], 2);
+    expect(client.diagnostics['dropped'], 0);
+    await client.flush();
+    expect(client.diagnostics['pending'], 0);
+    expect(client.diagnostics['last_status'], 200);
   });
 }

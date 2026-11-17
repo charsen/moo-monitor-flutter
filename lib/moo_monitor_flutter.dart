@@ -29,6 +29,9 @@ class MooMonitor {
   static bool get installed => _client?.active ?? false;
   static bool get disabled => _client?.disabled ?? false;
 
+  /// Read-only counters for host-side triage; contains no business content.
+  static Map<String, Object?>? get diagnostics => _client?.diagnostics;
+
   static Future<bool> install(MonitorConfig config,
       {Directory? directory, bool installHandlers = true}) {
     if (_client != null) return Future.value(installed);

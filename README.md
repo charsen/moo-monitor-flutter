@@ -13,6 +13,8 @@ await MooMonitor.install(MonitorConfig(
 runApp(const App());
 ```
 
+> SDK 只在 Android / iOS 安装；Web、桌面不会安装。宿主不要把 `Platform.isIOS` 之类的直接判断放到 Web 会执行的路径上（可用 `kIsWeb` 先拦）。
+
 宿主已有统一异常入口时使用 `installHandlers: false` 并调用 `MooMonitor.capture(error, stack, message: '固定诊断描述', source: 'flutter_framework')`，避免重复上报。默认钩子保留 Flutter/PlatformDispatcher 原处理链与返回值，不创建新 zone。子 isolate 在 paused 启动后用 `observeIsolate` 注册，再 resume；结束时 `stopObservingIsolate`。
 
 只支持实际 `android` / `ios` 平台，不把 Flutter 当 OS。框架、root/child isolate 异常记为 `handled`；低内存警告单独记录，不宣称进程崩溃、OOM 或原生信号已捕获。原生 Java/NSException/信号适配另见 [TODOS](TODOS.md)。

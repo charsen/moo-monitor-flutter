@@ -11,6 +11,9 @@ import 'redactor.dart';
 import 'store.dart';
 import 'transport.dart';
 
+/// Single source of truth for the SDK version sent in every envelope.
+const String sdkVersion = '0.1.0';
+
 String newEventId() {
   final random = Random.secure();
   final bytes = List.generate(16, (_) => random.nextInt(256));
@@ -65,9 +68,20 @@ class MonitorClient {
   String? _screen;
   int? _lastMemoryWarning;
   int _attempts = 0;
+  int? lastStatus;
   Timer? _timer;
+  int? _timerDueMs;
   Future<void>? _flush;
   bool get active => config.enabled && !disabled && !_closed;
+
+  /// Read-only, business-free counters for host-side triage.
+  Map<String, Object?> get diagnostics => <String, Object?>{
+        'pending': store.pendingLength,
+        'dropped': store.dropped,
+        'disabled': disabled,
+        'closed': _closed,
+        if (lastStatus != null) 'last_status': lastStatus,
+      };
 
   void capture(Object error, StackTrace stack,
       {String? message,
@@ -155,8 +169,7 @@ class MonitorClient {
     if (!active || foreground == _foreground) return;
     _foreground = foreground;
     _breadcrumb('lifecycle', foreground ? 'foreground' : 'background');
-    _timer?.cancel();
-    _timer = null;
+    _cancelTimer();
     schedule(Duration.zero);
   }
 
@@ -219,10 +232,23 @@ class MonitorClient {
     } catch (_) {/* diagnostics cannot affect host work */}
   }
 
+  void _cancelTimer() {
+    _timer?.cancel();
+    _timer = null;
+    _timerDueMs = null;
+  }
+
   void schedule(Duration delay) {
-    if (!automatic || !active || _exhausted || _timer != null) return;
-    _timer = Timer(delay, () {
+    if (!automatic || !active || _exhausted) return;
+    final due = now().millisecondsSinceEpoch + delay.inMilliseconds;
+    // Keep the earliest deadline instead of ignoring a sooner request.
+    final current = _timerDueMs;
+    if (_timer != null && current != null && current <= due) return;
+    _timer?.cancel();
+    _timerDueMs = due;
+    _timer = Timer(delay.isNegative ? Duration.zero : delay, () {
       _timer = null;
+      _timerDueMs = null;
       unawaited(flush());
     });
   }
@@ -245,8 +271,7 @@ class MonitorClient {
   }
 
   Future<void> _send() async {
-    _timer?.cancel();
-    _timer = null;
+    _cancelTimer();
     if (!active || _exhausted || !store.readable) return;
     final state = store.readState('retry');
     final next = state?['next_at'];
@@ -261,9 +286,10 @@ class MonitorClient {
       return;
     }
     var batches = 0;
-    while (active && store.pending.isNotEmpty) {
+    final envelopeBytes = _encode(const []).length;
+    while (active && store.hasPending) {
       final batch = <QueueEntry>[];
-      var size = _encode([]).length;
+      var size = envelopeBytes;
       for (final entry in store.pending.take(50)) {
         final nextSize = size + entry.bytes - 1 + (batch.isEmpty ? 0 : 1);
         if (nextSize > 512 * 1024) break;
@@ -272,11 +298,12 @@ class MonitorClient {
       }
       if (batch.isEmpty) return;
       final response = await transport.send(_encode(batch));
+      lastStatus = response.status;
       if (!active) return;
       if (response.status == 401 || response.status == 403) {
         disabled = true;
         store.writeState('disabled', {'identity': identity});
-        _timer?.cancel();
+        _cancelTimer();
         return;
       }
       if (response.status >= 200 && response.status < 300) {
@@ -314,7 +341,11 @@ class MonitorClient {
 
   List<int> _encode(List<QueueEntry> batch) => utf8.encode(jsonEncode({
         'app': config.app,
-        'sdk': {'name': 'moo-monitor-flutter', 'version': '0.1.0', 'schema': 1},
+        'sdk': {
+          'name': 'moo-monitor-flutter',
+          'version': sdkVersion,
+          'schema': 1
+        },
         'records': batch.map((entry) => entry.record).toList(),
       }));
 
@@ -389,7 +420,7 @@ class MonitorClient {
 
   void close() {
     _closed = true;
-    _timer?.cancel();
+    _cancelTimer();
     transport.close();
   }
 }

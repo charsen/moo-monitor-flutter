@@ -97,4 +97,21 @@ void main() {
       expect(Redactor.screen(value), isNull);
     }
   });
+  test('separator-free long input skips credential scan and stays bounded', () {
+    final input = 'x' * 60000; // no ':' or '=' -> credential matcher skipped
+    final watch = Stopwatch()..start();
+    final out = Redactor.scrub(input, bytes: 4096);
+    watch.stop();
+    expect(out.length, lessThanOrEqualTo(4096));
+    expect(watch.elapsedMilliseconds, lessThan(2000));
+  });
+  test('long credential-bearing input stays bounded and redacted', () {
+    final input = 'token=${'a' * 60000}'; // triggers the credential matcher
+    final watch = Stopwatch()..start();
+    final out = Redactor.scrub(input, bytes: 4096);
+    watch.stop();
+    expect(out, contains('[credential]'));
+    expect(out.length, lessThanOrEqualTo(4096));
+    expect(watch.elapsedMilliseconds, lessThan(4000));
+  });
 }

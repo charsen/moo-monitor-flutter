@@ -11,7 +11,7 @@
 
 同一个 Flutter App 在 Android/iOS 共用一枚反馈/监控 token，身份认证与平台分类独立。SDK 按 `MonitorConfig.platform` 写入每条记录；光语宿主自动检测手机运行环境后填 `android` 或 `ios`。反馈同样由客户端检测后发送 `platform`，后端各自校验并入库，不按 token 识别平台。构建的统一入口与标签只在 host BUILD 维护，SDK 不另建按 OS 取凭据的规则。
 
-独立 Application Support 子目录，单个 root isolate 持有。事件同步追加并 flush，普通追加缓存条数/字节；最多 200 条 / 2 MB、单条 256 KB，轮转原子替换并保留较新记录。恢复坏行与半行，读失败不覆盖源；无本地指纹合并。发送冻结原始行收据，只确认对应条目，允许发送期间追加/轮转。计数与丢弃数只反映当前进程可观察范围。
+独立 Application Support 子目录，单个 root isolate 持有。事件同步追加并 flush，普通追加缓存条数/字节；最多 200 条 / 2 MB、单条 256 KB，轮转原子替换并保留较新记录。恢复坏行与半行，读失败不覆盖源；无本地指纹合并。发送冻结原始行收据，只确认对应条目，允许发送期间追加/轮转。计数与丢弃数只反映当前进程可观察范围；尾部截断或坏行修复只至少 +1、不逐行精确计数，属近似值。
 
 随机 UUID 生成安装身份并 SHA-256；不读取宿主安装身份、IDFA/IDFV/硬件 serial。会话另用 UUID。队列内保留事件原始时间/构建与 event_id，补发不重新标注；服务端去重仍只有有限窗口。
 
@@ -61,3 +61,14 @@ ListQueue保持最多30条t/type/name，相邻同type/name合并并保留首次�
 error.toString、StackTrace.toString及自定义Map枚举会执行宿主代码。capture在这些读取之前进入客户端级同步保护，finally解除；同一root isolate内的嵌套采集静默返回，不打印诊断日志、不增加dropped。实际序列化失败仍按原规则记dropped，之后正常采集可继续。保护没有跨await持有，也不建立新zone或跨isolate状态。
 
 对照[Sentry Dart去重处理器](https://github.com/getsentry/sentry-dart/blob/f680659cfd1471adab34ccc2ba1e43e434ee6ec2/packages/dart/lib/src/deduplication/deduplication_event_processor.dart)后，本库不照搬按对象hash保留历史窗口的方案；一次采集返回后，合法后续调用（含复用同一异常或hash相同的不同异常）继续保留独立event_id/count=1。这里仅防同步重入，不合并业务重试，也不消除先后两个独立hook对同一错误的转发。宿主属性仍同步执行，不是执行超时或沙箱机制。
+
+
+## 性能与可观测性（2026-11-17）
+
+- 传输复用单个 `HttpClient`（`close()` 时强制关闭）；非 2xx 响应体 drain 以保持 keep-alive；超时/异常会丢弃该连接并在下次重建。
+- `EventStore.pending` 保持不可变快照（回执批次不可被后续 append 改变）；新增 `pendingLength`/`hasPending` 供排空循环使用，去掉按批次的重复整表复制（仍保留一次快照复制以维持语义）。
+- 调度保留最早 deadline：更早的 `schedule` 会取代更晚的定时器，首个事件不再因初始 10s 定时器而延迟。
+- 凭据脱敏正则只在其必须的 `:`/`=` 存在时才运行，无分隔的长文本走线性路径；`scrubBounded/fit` 返回并复用 UTF-8 字节数，消除 payload 的重复编码统计。
+- 新增只读 `MooMonitor.diagnostics`（pending / dropped / disabled / closed / last_status），不含业务内容；SDK 版本收敛为单一常量。
+- `analysis_options` 启用 strict-casts / strict-inference / strict-raw-types。
+

@@ -28,7 +28,11 @@ class EventStore {
   int _bytes = 0, dropped = 0;
   bool readable = true;
   File get _queue => File('${directory.path}/queue.jsonl');
+
+  /// Immutable snapshot: a captured batch must not change as the queue grows.
   List<QueueEntry> get pending => List.unmodifiable(_entries);
+  int get pendingLength => _entries.length;
+  bool get hasPending => _entries.isNotEmpty;
 
   void _load() {
     final type = FileSystemEntity.typeSync(_queue.path, followLinks: false);

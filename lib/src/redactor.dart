@@ -17,18 +17,32 @@ class Redactor {
   static final _jwt =
       RegExp(r'\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+');
 
-  static String truncate(String text, int bytes) {
+  /// Fit [text] into [bytes] UTF-8 bytes without splitting a code point and
+  /// report the exact byte length so budgeted callers avoid re-encoding it.
+  static ({String text, int bytes}) fit(String text, int bytes) {
     // Bound allocation before UTF-8 encoding; a UTF-16 unit uses at least one byte.
     final data = utf8.encode(text.substring(0, text.length.clamp(0, bytes)));
-    if (data.length <= bytes) return utf8.decode(data, allowMalformed: true);
+    if (data.length <= bytes) {
+      return (
+        text: utf8.decode(data, allowMalformed: true),
+        bytes: data.length
+      );
+    }
     var end = bytes;
     while (end > 0 && (data[end] & 0xc0) == 0x80) {
       end--;
     }
-    return utf8.decode(data.sublist(0, end), allowMalformed: true);
+    return (
+      text: utf8.decode(data.sublist(0, end), allowMalformed: true),
+      bytes: end
+    );
   }
 
-  static String scrub(String text, {int bytes = 8192}) {
+  static String truncate(String text, int bytes) => fit(text, bytes).text;
+
+  /// Scrub and bound [text], also returning the UTF-8 byte length of the result.
+  static ({String text, int bytes}) scrubBounded(String text,
+      {int bytes = 8192}) {
     var value = text;
     if (text.length > 65536) {
       // Retain complete stack lines; omit the line crossing the scan boundary.
@@ -38,14 +52,21 @@ class Redactor {
           ? '[truncated]'
           : '${prefix.substring(0, boundary)}\n[truncated]';
     }
+    // The credential matcher requires a ':' or '=' separator, so inputs without
+    // one can skip it; this keeps large untrusted strings on a linear path.
+    if (value.contains(':') || value.contains('=')) {
+      value = value.replaceAll(_secrets, '[credential]');
+    }
     value = value
-        .replaceAll(_secrets, '[credential]')
         .replaceAll(_bearer, 'Bearer ***')
         .replaceAll(_jwt, '[credential]')
         .replaceAll(_urls, '[url]')
         .replaceAll(_paths, '[path]');
-    return truncate(value, bytes);
+    return fit(value, bytes);
   }
+
+  static String scrub(String text, {int bytes = 8192}) =>
+      scrubBounded(text, bytes: bytes).text;
 
   static String? screen(String name) =>
       RegExp(r'^[A-Za-z_][A-Za-z0-9_.]{0,63}$').hasMatch(name) ? name : null;
@@ -58,9 +79,9 @@ class Redactor {
       if (value == null || value is bool) return value;
       if (value is num) return value.isFinite ? value : null;
       if (value is String) {
-        final clean = scrub(value, bytes: bytes);
-        bytes -= utf8.encode(clean).length;
-        return clean;
+        final clean = scrubBounded(value, bytes: bytes);
+        bytes -= clean.bytes;
+        return clean.text;
       }
       if (value is Map) {
         final out = <String, Object?>{};
@@ -68,9 +89,9 @@ class Redactor {
           if (nodes <= 0 || bytes <= 0) break;
           if (entry.key is! String) continue;
           final key = entry.key as String;
-          final cleanKey = scrub(key, bytes: bytes.clamp(0, 64));
-          bytes -= utf8.encode(cleanKey).length;
-          out[cleanKey] =
+          final cleanKey = scrubBounded(key, bytes: bytes.clamp(0, 64));
+          bytes -= cleanKey.bytes;
+          out[cleanKey.text] =
               _secretKey.hasMatch(key) ? '***' : visit(entry.value, depth + 1);
         }
         return out;

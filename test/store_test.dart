@@ -63,4 +63,12 @@ void main() {
     expect(store.append({'event_id': 'a'}), isFalse);
     expect(Directory('${dir.path}/queue.jsonl').existsSync(), isTrue);
   });
+  test('pending is a read-only view with count helpers', () {
+    final store = EventStore(dir)..append({'event_id': 'a'});
+    expect(store.pendingLength, 1);
+    expect(store.hasPending, isTrue);
+    expect(store.pending, hasLength(1));
+    expect(
+        () => store.pending.add(store.pending.first), throwsUnsupportedError);
+  });
 }

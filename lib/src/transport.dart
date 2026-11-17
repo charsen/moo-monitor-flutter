@@ -18,15 +18,18 @@ class IoMonitorTransport implements MonitorTransport {
   IoMonitorTransport(this.endpoint, this.token);
   final Uri endpoint;
   final String token;
-  HttpClient? _active;
+  HttpClient? _client;
   bool _closed = false;
+
+  HttpClient _ensure() {
+    if (_closed) throw StateError('closed');
+    return _client ??= HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
+  }
 
   @override
   Future<HttpResult> send(List<int> body) async {
-    if (_closed) throw StateError('closed');
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 10);
-    _active = client;
+    final client = _ensure();
     try {
       return await (() async {
         final request = await client.postUrl(endpoint);
@@ -37,6 +40,7 @@ class IoMonitorTransport implements MonitorTransport {
         request.headers.set('X-Project-Token', token);
         request.add(body);
         final response = await request.close();
+        final retryAfter = response.headers.value(HttpHeaders.retryAfterHeader);
         final bytes = BytesBuilder(copy: false);
         if (response.statusCode >= 200 && response.statusCode < 300) {
           await for (final chunk in response) {
@@ -45,20 +49,27 @@ class IoMonitorTransport implements MonitorTransport {
             }
             bytes.add(chunk);
           }
+        } else {
+          // Drain error bodies so the kept-alive connection stays reusable.
+          await response.drain<void>();
         }
         return HttpResult(response.statusCode, bytes.takeBytes(),
-            retryAfter: response.headers.value(HttpHeaders.retryAfterHeader));
+            retryAfter: retryAfter);
       })()
           .timeout(const Duration(seconds: 15));
-    } finally {
-      client.close(force: true);
-      if (identical(_active, client)) _active = null;
+    } catch (_) {
+      // Any thrown error (timeout, reset, oversized) taints the pooled socket.
+      _client?.close(force: true);
+      _client = null;
+      rethrow;
     }
   }
 
   @override
   void close() {
+    if (_closed) return;
     _closed = true;
-    _active?.close(force: true);
+    _client?.close(force: true);
+    _client = null;
   }
 }
