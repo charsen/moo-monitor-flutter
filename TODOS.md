@@ -11,3 +11,4 @@
 - 2026-11-17：已实现内存趋势采样、非正常退出上报（宿主开启）、稳定事件名与诊断增强；仍待原生崩溃/ANR 采集、AOT 本地符号化与后端 `session_exit`/`memory_samples` 契约落库验证。
 
 - 2026-11-17：已提供 captureNative 转发入口与 Cloud 落库校验；真正原生崩溃/ANR 采集仍需原生插件，AOT 符号还原需 split-debug-info + 后端符号服务。
+- 2026-11-17：原生插件骨架（iOS ObjC 未捕获异常 + Android UncaughtExceptionHandler + 待发回放）已加入并通过 iOS 编译；信号/MetricKit/NDK signal/ANR watchdog、与 Dart hook 去重、真机崩溃注入验收仍待做。

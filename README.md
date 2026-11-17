@@ -34,3 +34,7 @@ token 只用于项目与能力认证。SDK 每条记录携带 `MonitorConfig.pla
 ## 原生事件通道（MethodChannel）
 
 原生插件捕获（崩溃/ANR/信号）后可经 MethodChannel 转发：方法名 `captureNative`，参数 `{kind, name, message?, source?, extras?}`（kind: crash/anr/hang/handled/termination/webview_gone）。宿主在 install 后调用 `MooMonitor.bindNativeChannel(channel)` 绑定。SDK 只解析、脱敏、有界化与投递，不安装任何原生处理器。
+
+## 原生插件骨架（最小）
+
+本包现为 Flutter 插件：iOS `MooMonitorFlutterPlugin`（未捕获 ObjC 异常写入 Application Support 待发文件）与 Android `MooMonitorFlutterPlugin`（包装默认 UncaughtExceptionHandler 写 filesDir 待发文件）在 native 侧记录，Dart 绑定 `moo_monitor/native` 通道并调用 `flushPending` 回放。宿主示例：`MooMonitor.bindNativeChannel(MethodChannel('moo_monitor/native'))` 后 `invokeMethod('flushPending')`。信号/MetricKit/NDK/ANR 仍为 TODO，不得宣称已覆盖原生崩溃。

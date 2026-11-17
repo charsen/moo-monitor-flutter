@@ -13,3 +13,12 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.mooeen.moo_monitor_flutter
+        pluginClass: MooMonitorFlutterPlugin
+      ios:
+        pluginClass: MooMonitorFlutterPlugin
