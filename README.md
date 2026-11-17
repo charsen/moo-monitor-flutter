@@ -30,3 +30,7 @@ token 只用于项目与能力认证。SDK 每条记录携带 `MonitorConfig.pla
 新增可选配置：`detectUncleanExit`（默认 false；宿主开启后在“上次带内存警告且未干净退出”时上报 `UncleanExit`）、`memorySampleLimit`（默认 8）、`symbolId`（AOT 符号化标识，写入 `context.symbol_id`）。低内存事件额外携带 `warnings_in_session` 与有界 `memory_samples` 序列。
 
 原生事件转发：宿主原生层（MetricKit/信号/Java/NSException）捕获后调用 `MooMonitor.captureNative(kind:..., name:..., message:..., extras:...)` 交给本 SDK 上报；本 SDK 不安装原生处理器。
+
+## 原生事件通道（MethodChannel）
+
+原生插件捕获（崩溃/ANR/信号）后可经 MethodChannel 转发：方法名 `captureNative`，参数 `{kind, name, message?, source?, extras?}`（kind: crash/anr/hang/handled/termination/webview_gone）。宿主在 install 后调用 `MooMonitor.bindNativeChannel(channel)` 绑定。SDK 只解析、脱敏、有界化与投递，不安装任何原生处理器。

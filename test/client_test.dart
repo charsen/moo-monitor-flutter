@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moo_monitor_flutter/src/client.dart';
 import 'package:moo_monitor_flutter/src/config.dart';
@@ -503,5 +504,22 @@ void main() {
     client.capture(StateError('x'), StackTrace.empty, kind: 'bogus');
     client.captureNative(kind: 'low_memory', name: 'x');
     expect(client.store.pending, isEmpty);
+  });
+  test('native MethodChannel payload is forwarded, unknown methods ignored',
+      () {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    client.handleNativeCall(const MethodCall('captureNative', {
+      'kind': 'anr',
+      'name': 'ANR',
+      'message': 'ANR',
+      'extras': {'duration_ms': 5000}
+    }));
+    final record = client.store.pending.single.record;
+    expect(record['kind'], 'anr');
+    expect((record['exception'] as Map)['name'], 'ANR');
+    expect((record['payload'] as Map)['duration_ms'], 5000);
+    client.handleNativeCall(const MethodCall('somethingElse'));
+    client.handleNativeCall(const MethodCall('captureNative', {'kind': 1}));
+    expect(client.store.pending.length, 1);
   });
 }

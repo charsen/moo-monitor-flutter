@@ -7,6 +7,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart' as painting;
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -106,6 +107,11 @@ class MooMonitor {
           message: message,
           source: source,
           extras: extras);
+
+  /// Bind a MethodChannel so a native plugin can forward crash/ANR events.
+  /// Protocol: method 'captureNative', args {kind, name, message?, source?, extras?}.
+  static void bindNativeChannel(MethodChannel channel) =>
+      _client?.bindNativeChannel(channel);
 
   static void screen(String name) => _client?.screen(name);
 

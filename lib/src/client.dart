@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 
 import 'config.dart';
 import 'redactor.dart';
@@ -120,6 +121,32 @@ class MonitorClient {
         kind: kind,
         name: name,
         extras: extras);
+  }
+
+  /// Parse an event forwarded by a native plugin over a MethodChannel.
+  /// Protocol: method 'captureNative', args {kind, name, message?, source?, extras?}.
+  void handleNativeCall(MethodCall call) {
+    if (call.method != 'captureNative') return;
+    final args = call.arguments;
+    if (args is! Map) return;
+    final kind = args['kind'];
+    final name = args['name'];
+    if (kind is! String || name is! String) return;
+    final extras = args['extras'];
+    captureNative(
+        kind: kind,
+        name: name,
+        message: args['message'] is String
+            ? args['message'] as String
+            : 'Native error',
+        source: args['source'] is String
+            ? args['source'] as String
+            : 'native_forward',
+        extras: extras is Map ? extras.cast<String, Object?>() : const {});
+  }
+
+  void bindNativeChannel(MethodChannel channel) {
+    channel.setMethodCallHandler((call) async => handleNativeCall(call));
   }
 
   void capture(Object error, StackTrace stack,
