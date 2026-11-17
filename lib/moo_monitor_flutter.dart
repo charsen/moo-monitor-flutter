@@ -93,6 +93,20 @@ class MooMonitor {
         message: message, source: source, name: name, extras: extras);
   }
 
+  /// Forward a native-origin event from a host/native bridge (see README).
+  static void captureNative(
+          {required String kind,
+          required String name,
+          String message = 'Native error',
+          String source = 'native_forward',
+          Map<String, Object?> extras = const {}}) =>
+      _client?.captureNative(
+          kind: kind,
+          name: name,
+          message: message,
+          source: source,
+          extras: extras);
+
   static void screen(String name) => _client?.screen(name);
 
   /// Fixed code labels only (sync / reader.identity.ok), never URLs or content.

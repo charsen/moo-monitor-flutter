@@ -484,4 +484,24 @@ void main() {
     expect(client.diagnostics['last_status'], 503);
     expect(client.diagnostics['last_error'], 'http_503');
   });
+  test('native forwarded events keep kind and stable name', () {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    client.captureNative(
+        kind: 'crash',
+        name: 'SIGTRAP',
+        message: 'signal 5',
+        extras: {'signal': 5});
+    final record = client.store.pending.single.record;
+    expect(record['kind'], 'crash');
+    expect((record['exception'] as Map)['name'], 'SIGTRAP');
+    final payload = record['payload'] as Map;
+    expect(payload['source'], 'native_forward');
+    expect(payload['signal'], 5);
+  });
+  test('unknown kinds are ignored and native low_memory is rejected', () {
+    final client = make(FakeTransport((r) async => receipt(r)));
+    client.capture(StateError('x'), StackTrace.empty, kind: 'bogus');
+    client.captureNative(kind: 'low_memory', name: 'x');
+    expect(client.store.pending, isEmpty);
+  });
 }

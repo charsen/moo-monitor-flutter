@@ -86,3 +86,8 @@ error.toString、StackTrace.toString及自定义Map枚举会执行宿主代码�
 
 边界：原生崩溃/ANR、OOM/watchdog 归因、AOT 本地符号还原仍需原生或构建链/后端配合，未在本 Dart SDK 内实现。
 
+
+## 原生事件转发（captureNative，2026-11-17）
+
+`MooMonitor.captureNative({kind, name, message, source='native_forward', extras})` 提供“原生桥接/宿主 → SDK”的正式转发入口：宿主用原生插件（MetricKit、signal、Java/NSException）捕获后，可直接把事件交给本 SDK 落盘/上报。kind 支持 crash/anr/hang/handled/termination/webview_gone（low_memory 走 memoryWarning）。**本 SDK 仍不安装原生信号处理器**，不宣称已覆盖原生崩溃；只负责记录/有界/投递。服务端已支持这些 kind。
+

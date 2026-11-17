@@ -94,13 +94,41 @@ class MonitorClient {
           'last_sent_at': lastSentAt!.toUtc().toIso8601String(),
       };
 
+  static const List<String> _allowedKinds = <String>[
+    'crash',
+    'anr',
+    'hang',
+    'low_memory',
+    'handled',
+    'termination',
+    'webview_gone'
+  ];
+
+  /// Forward a native-origin event captured by the host/native bridge (MetricKit,
+  /// signal handler, Java/NSException). This SDK does not install native handlers;
+  /// it only records, bounds and delivers what the native layer reports.
+  void captureNative(
+      {required String kind,
+      required String name,
+      String message = 'Native error',
+      String source = 'native_forward',
+      Map<String, Object?> extras = const {}}) {
+    if (!_allowedKinds.contains(kind) || kind == 'low_memory') return;
+    capture(const _NativeEvent(), StackTrace.empty,
+        message: message,
+        source: source,
+        kind: kind,
+        name: name,
+        extras: extras);
+  }
+
   void capture(Object error, StackTrace stack,
       {String? message,
       String source = 'capture',
       String kind = 'handled',
       String? name,
       Map<String, Object?> extras = const {}}) {
-    if (!active || _capturing || !['handled', 'low_memory'].contains(kind)) {
+    if (!active || _capturing || !_allowedKinds.contains(kind)) {
       return;
     }
     // toString/StackTrace/custom Map access can synchronously re-enter capture.
@@ -542,4 +570,8 @@ class _MemoryWarning implements Exception {
 
 class _UncleanExit implements Exception {
   const _UncleanExit();
+}
+
+class _NativeEvent implements Exception {
+  const _NativeEvent();
 }
