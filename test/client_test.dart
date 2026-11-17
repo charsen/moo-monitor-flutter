@@ -90,9 +90,18 @@ void main() {
   MonitorClient make(FakeTransport transport,
       {String token = 'fixture',
       int maxRecords = 200,
-      Map<String, int> Function()? snapshot}) {
+      Map<String, int> Function()? snapshot,
+      bool detectUncleanExit = false,
+      int memorySampleLimit = 8,
+      String symbolId = ''}) {
     final client = MonitorClient(
-        MonitorConfig(token: token, app: 'fixture', platform: 'android'),
+        MonitorConfig(
+            token: token,
+            app: 'fixture',
+            platform: 'android',
+            detectUncleanExit: detectUncleanExit,
+            memorySampleLimit: memorySampleLimit,
+            symbolId: symbolId),
         EventStore(dir, maxRecords: maxRecords),
         transport: transport,
         now: () => now,
@@ -430,5 +439,49 @@ void main() {
     await client.flush();
     expect(client.diagnostics['pending'], 0);
     expect(client.diagnostics['last_status'], 200);
+  });
+  test('memory warning exposes stable name, bounded samples and session count',
+      () {
+    final client = make(FakeTransport((r) async => receipt(r)),
+        memorySampleLimit: 3,
+        snapshot: () => {'image_cache_bytes': 10, 'process_rss_bytes': 100});
+    client.lifecycle(true);
+    client.screen('Route_a');
+    client.memoryWarning();
+    final record = client.store.pending.single.record;
+    expect((record['exception'] as Map)['name'], 'MemoryWarning');
+    final payload = record['payload'] as Map;
+    expect(payload['warnings_in_session'], 1);
+    final samples = payload['memory_samples'] as List;
+    expect(samples, isNotEmpty);
+    expect(samples.length, lessThanOrEqualTo(3));
+    expect((samples.last as Map)['process_rss_bytes'], 100);
+  });
+  test('unclean exit after a memory warning is reported once', () {
+    final store = EventStore(dir);
+    store.writeState('session', <String, dynamic>{
+      'session_id': 'previous-session',
+      'build': '13',
+      'clean': false,
+      'had_memory_warning': true,
+      'last_rss': 123456,
+      'last_screen': 'Route_self_notes',
+      'heartbeat_at': '2026-11-17T04:00:00.000Z',
+    });
+    final client =
+        make(FakeTransport((r) async => receipt(r)), detectUncleanExit: true);
+    final entry = client.store.pending.firstWhere((e) {
+      final payload = e.record['payload'];
+      return payload is Map && payload['source'] == 'session_exit';
+    });
+    expect((entry.record['exception'] as Map)['name'], 'UncleanExit');
+    expect((entry.record['payload'] as Map)['previous_rss_bytes'], 123456);
+  });
+  test('diagnostics records last error for failed batches', () async {
+    final client = make(FakeTransport((r) async => HttpResult(503, [])));
+    capture(client);
+    await client.flush();
+    expect(client.diagnostics['last_status'], 503);
+    expect(client.diagnostics['last_error'], 'http_503');
   });
 }

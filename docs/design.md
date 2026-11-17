@@ -72,3 +72,17 @@ error.toString、StackTrace.toString及自定义Map枚举会执行宿主代码�
 - 新增只读 `MooMonitor.diagnostics`（pending / dropped / disabled / closed / last_status），不含业务内容；SDK 版本收敛为单一常量。
 - `analysis_options` 启用 strict-casts / strict-inference / strict-raw-types。
 
+
+
+## 内存趋势、非正常退出与诊断（2026-11-17）
+
+基于线上唯一真实信号（光语 iOS 0.0.3 内存警告 19 次/17 会话，仅有警告瞬间快照、无法判断趋势/是否被杀）新增：
+
+- **内存趋势采样（有界）**：在 lifecycle 恢复、screen 变化、低内存警告时调用 `memorySnapshot`，保留最近 `memorySampleLimit`（默认 8、上限 32）条固定数值样本（uptime_ms、image_cache_*、process_rss_bytes、process_peak_rss_bytes）。仅前台/启用时采样，不新增后台轮询。低内存事件 payload 附 `warnings_in_session` 与会话内 `memory_samples` 序列，便于区分缓慢增长与瞬时峰值。
+- **非正常退出检测（默认关闭，宿主显式开启）**：会话状态（session_id/build/clean/had_memory_warning/last_rss/last_screen/heartbeat）写入 store 状态文件；`close()` 标记 clean。下次启动若上次 `clean!=true` 且 `had_memory_warning==true` 且非同一会话，则上报 `source=session_exit`、`exception.name=UncleanExit`，附上次 RSS/界面/心跳。默认关闭以避免未调用 `close` 的宿主误报；光语宿主已开启。仅表示“上次未干净退出”，不宣称 OOM/Jetsam。
+- **稳定事件名**：低内存事件由私有类名 `_MemoryWarning` 改为固定 `MemoryWarning`，避免类重命名导致服务端分组漂移。
+- **诊断增强**：`MooMonitor.diagnostics` 增加 `pending_bytes`、`last_error`（如 `transport_error`/`http_503`/`unauthorized`）、`last_sent_at`。
+- **符号 ID 预留**：`MonitorConfig.symbolId` 可传 split-debug-info 标识，写入记录 `context.symbol_id`，供后端 AOT 符号化；本 SDK 不做本地符号化。
+
+边界：原生崩溃/ANR、OOM/watchdog 归因、AOT 本地符号还原仍需原生或构建链/后端配合，未在本 Dart SDK 内实现。
+

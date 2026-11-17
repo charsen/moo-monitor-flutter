@@ -87,9 +87,10 @@ class MooMonitor {
   static void capture(Object error, StackTrace stack,
       {String? message,
       String source = 'capture',
+      String? name,
       Map<String, Object?> extras = const {}}) {
     _client?.capture(error, stack,
-        message: message, source: source, extras: extras);
+        message: message, source: source, name: name, extras: extras);
   }
 
   static void screen(String name) => _client?.screen(name);

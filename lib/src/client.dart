@@ -50,6 +50,8 @@ class MonitorClient {
     final seed = oldId is String && oldId.isNotEmpty ? oldId : newEventId();
     if (oldId != seed) store.writeState('identity', {'seed': seed});
     installId = sha256.convert(utf8.encode(seed)).toString();
+    if (config.detectUncleanExit && active) _reportUncleanExitIfNeeded();
+    _persistSession(clean: false);
     if (!disabled && config.enabled) schedule(const Duration(seconds: 10));
   }
   final MonitorConfig config;
@@ -69,6 +71,11 @@ class MonitorClient {
   int? _lastMemoryWarning;
   int _attempts = 0;
   int? lastStatus;
+  String? lastError;
+  DateTime? lastSentAt;
+  final ListQueue<Map<String, Object>> _memorySamples =
+      ListQueue<Map<String, Object>>();
+  int _memoryWarnings = 0;
   Timer? _timer;
   int? _timerDueMs;
   Future<void>? _flush;
@@ -77,16 +84,21 @@ class MonitorClient {
   /// Read-only, business-free counters for host-side triage.
   Map<String, Object?> get diagnostics => <String, Object?>{
         'pending': store.pendingLength,
+        'pending_bytes': store.pendingBytes,
         'dropped': store.dropped,
         'disabled': disabled,
         'closed': _closed,
         if (lastStatus != null) 'last_status': lastStatus,
+        if (lastError != null) 'last_error': lastError,
+        if (lastSentAt != null)
+          'last_sent_at': lastSentAt!.toUtc().toIso8601String(),
       };
 
   void capture(Object error, StackTrace stack,
       {String? message,
       String source = 'capture',
       String kind = 'handled',
+      String? name,
       Map<String, Object?> extras = const {}}) {
     if (!active || _capturing || !['handled', 'low_memory'].contains(kind)) {
       return;
@@ -121,7 +133,8 @@ class MonitorClient {
         'build': Redactor.truncate(config.build, 32),
         'env': Redactor.truncate(config.environment, 16),
         'exception': {
-          'name': Redactor.scrub(error.runtimeType.toString(), bytes: 192),
+          'name':
+              Redactor.scrub(name ?? error.runtimeType.toString(), bytes: 192),
           'message': Redactor.scrub(text),
           'stack': trace
         },
@@ -141,7 +154,9 @@ class MonitorClient {
           'install_id': installId,
           'session_id': sessionId,
           if (_screen != null) 'screen': _screen,
-          if (_foreground != null) 'foreground': _foreground
+          if (_foreground != null) 'foreground': _foreground,
+          if (config.symbolId.isNotEmpty)
+            'symbol_id': Redactor.truncate(config.symbolId, 64)
         },
         'breadcrumbs':
             _breadcrumbs.map((entry) => Map<String, Object>.of(entry)).toList(),
@@ -163,12 +178,16 @@ class MonitorClient {
     if (!active || Redactor.screen(value) == null || value == _screen) return;
     _screen = value;
     _breadcrumb('screen', value);
+    _sampleMemory();
+    _persistSession(clean: false);
   }
 
   void lifecycle(bool foreground) {
     if (!active || foreground == _foreground) return;
     _foreground = foreground;
     _breadcrumb('lifecycle', foreground ? 'foreground' : 'background');
+    if (foreground) _sampleMemory();
+    _persistSession(clean: false);
     _cancelTimer();
     schedule(Duration.zero);
   }
@@ -181,29 +200,111 @@ class MonitorClient {
       return;
     }
     _lastMemoryWarning = elapsed;
+    _memoryWarnings++;
     final metrics = <String, Object?>{};
     // Sample only after throttling. A failed sampler must never suppress the
     // warning or retain application objects during an already pressured moment.
     try {
       final snapshot = memorySnapshot?.call() ?? const <String, int>{};
-      for (final key in const [
-        'image_cache_bytes',
-        'image_cache_count',
-        'image_cache_live_count',
-        'image_cache_pending_count',
-        'process_rss_bytes',
-        'process_peak_rss_bytes'
-      ]) {
+      for (final key in _memoryKeys) {
         final value = snapshot[key];
         if (value != null && value >= 0) metrics[key] = value;
       }
+      _recordMemorySample(elapsed, metrics);
     } catch (_) {/* keep the warning without optional measurements */}
+    _persistSession(clean: false);
     capture(const _MemoryWarning(), StackTrace.empty,
         message: 'Memory warning',
         source: 'memory_warning',
         kind: 'low_memory',
-        extras: metrics);
+        name: 'MemoryWarning',
+        extras: <String, Object?>{
+          ...metrics,
+          'warnings_in_session': _memoryWarnings,
+          if (_memorySamples.isNotEmpty)
+            'memory_samples':
+                _memorySamples.map((e) => Map<String, Object>.of(e)).toList(),
+        });
     // The event is a memory warning, never evidence of an OOM process kill.
+  }
+
+  static const List<String> _memoryKeys = <String>[
+    'image_cache_bytes',
+    'image_cache_count',
+    'image_cache_live_count',
+    'image_cache_pending_count',
+    'process_rss_bytes',
+    'process_peak_rss_bytes'
+  ];
+
+  void _recordMemorySample(int uptimeMs, Map<String, Object?> values) {
+    final entry = <String, Object>{'uptime_ms': uptimeMs};
+    for (final key in _memoryKeys) {
+      final value = values[key];
+      if (value is int && value >= 0) entry[key] = value;
+    }
+    if (entry.length == 1) return; // nothing measurable
+    _memorySamples.add(entry);
+    final limit = config.memorySampleLimit.clamp(1, 32);
+    while (_memorySamples.length > limit) {
+      _memorySamples.removeFirst();
+    }
+  }
+
+  void _sampleMemory() {
+    final snapshot = memorySnapshot;
+    if (snapshot == null || !config.enabled) return;
+    try {
+      _recordMemorySample(_uptime.elapsedMilliseconds, snapshot());
+    } catch (_) {/* optional measurements must not affect host work */}
+  }
+
+  void _persistSession({required bool clean}) {
+    if (!config.enabled) return;
+    try {
+      final rss = _latestRss();
+      store.writeState('session', <String, dynamic>{
+        'session_id': sessionId,
+        'build': config.build,
+        'clean': clean,
+        'had_memory_warning': _memoryWarnings > 0,
+        if (rss != null) 'last_rss': rss,
+        if (_screen != null) 'last_screen': _screen,
+        if (_foreground != null) 'foreground': _foreground,
+        'heartbeat_at': now().toUtc().toIso8601String(),
+      });
+    } catch (_) {/* state is best-effort diagnostics */}
+  }
+
+  int? _latestRss() {
+    for (final entry in _memorySamples.toList().reversed) {
+      final value = entry['process_rss_bytes'];
+      if (value is int) return value;
+    }
+    return null;
+  }
+
+  void _reportUncleanExitIfNeeded() {
+    final previous = store.readState('session');
+    if (previous == null || previous['clean'] == true) return;
+    if (previous['had_memory_warning'] != true) return;
+    final previousId = previous['session_id'];
+    if (previousId is String && previousId == sessionId) return;
+    _memoryWarnings = 0;
+    capture(const _UncleanExit(), StackTrace.empty,
+        message:
+            'Previous session ended without a clean shutdown after a memory warning',
+        source: 'session_exit',
+        name: 'UncleanExit',
+        extras: <String, Object?>{
+          if (previous['last_rss'] is int)
+            'previous_rss_bytes': previous['last_rss'],
+          if (previous['last_screen'] is String)
+            'previous_screen': previous['last_screen'],
+          if (previous['build'] is String) 'previous_build': previous['build'],
+          if (previous['heartbeat_at'] is String)
+            'previous_heartbeat_at': previous['heartbeat_at'],
+        });
   }
 
   void _breadcrumb(String type, String name) {
@@ -261,6 +362,7 @@ class MonitorClient {
       try {
         await _send();
       } catch (_) {
+        lastError = 'transport_error';
         if (active) _retry();
       } finally {
         _flush = null;
@@ -299,6 +401,13 @@ class MonitorClient {
       if (batch.isEmpty) return;
       final response = await transport.send(_encode(batch));
       lastStatus = response.status;
+      final ok = response.status >= 200 && response.status < 300;
+      lastError = ok
+          ? null
+          : (response.status == 401 || response.status == 403)
+              ? 'unauthorized'
+              : 'http_${response.status}';
+      if (ok) lastSentAt = now();
       if (!active) return;
       if (response.status == 401 || response.status == 403) {
         disabled = true;
@@ -419,6 +528,8 @@ class MonitorClient {
   }
 
   void close() {
+    if (_closed) return;
+    _persistSession(clean: true);
     _closed = true;
     _cancelTimer();
     transport.close();
@@ -427,4 +538,8 @@ class MonitorClient {
 
 class _MemoryWarning implements Exception {
   const _MemoryWarning();
+}
+
+class _UncleanExit implements Exception {
+  const _UncleanExit();
 }

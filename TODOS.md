@@ -8,3 +8,5 @@
 - [ ] 原生 Android/iOS 适配复用既有 SDK，明确双队列去重和身份后再接入；不在 Dart 捕获原生信号。
 - [ ] AOT split-debug-info 符号还原、系统后台机会、Application Support 备份排除。
 - [ ] 评估稳定安装身份的原生存储；不读取业务账号或硬件标识。
+- 2026-11-17：已实现内存趋势采样、非正常退出上报（宿主开启）、稳定事件名与诊断增强；仍待原生崩溃/ANR 采集、AOT 本地符号化与后端 `session_exit`/`memory_samples` 契约落库验证。
+

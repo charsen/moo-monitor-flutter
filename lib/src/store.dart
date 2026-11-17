@@ -32,6 +32,7 @@ class EventStore {
   /// Immutable snapshot: a captured batch must not change as the queue grows.
   List<QueueEntry> get pending => List.unmodifiable(_entries);
   int get pendingLength => _entries.length;
+  int get pendingBytes => _bytes;
   bool get hasPending => _entries.isNotEmpty;
 
   void _load() {
