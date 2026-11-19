@@ -38,3 +38,14 @@ token 只用于项目与能力认证。SDK 每条记录携带 `MonitorConfig.pla
 ## 原生插件骨架（最小）
 
 本包现为 Flutter 插件：iOS `MooMonitorFlutterPlugin`（未捕获 ObjC 异常写入 Application Support 待发文件）与 Android `MooMonitorFlutterPlugin`（包装默认 UncaughtExceptionHandler 写 filesDir 待发文件）在 native 侧记录，Dart 绑定 `moo_monitor/native` 通道并调用 `flushPending` 回放。宿主示例：`MooMonitor.bindNativeChannel(MethodChannel('moo_monitor/native'))` 后 `invokeMethod('flushPending')`。信号/MetricKit/NDK/ANR 仍为 TODO，不得宣称已覆盖原生崩溃。
+
+## AOT 符号上传（tools/upload-symbols.sh）
+
+Flutter 用 `flutter build ipa --split-debug-info=<dir>` 产出 AOT 符号目录后，用本仓 `tools/upload-symbols.sh` 上传到 Cloud 符号库，供崩溃栈符号化。符号上传是「monitor SDK + cloud」配套能力：不接本 SDK、不用 Cloud 的 App 不需要它。
+
+```bash
+MONITOR_TOKEN=<具备 app_errors 或 app_symbols 能力的 token> \
+  tools/upload-symbols.sh <symbols 目录> <release> <build> [endpoint]
+```
+
+三步直传（cloud 只签票据、文件本体直达七牛、不经 cloud）：1) `POST /api/v1/uploads/tickets` 取票据；2) multipart 直传七牛；3) `POST /api/v1/uploads/{upload_id}/confirm` 核验落盘。契约（`business=app_symbols`、`kind=flutter`）见 `moo-scaffold-cloud/docs/QINIU-DIRECT-UPLOAD.md`。宿主在自己的发布流程里按 sibling 路径直接调用本脚本（与 iOS/Android 的 `upload-dsyms.sh` / `upload-mapping.mjs` 同构），本仓不内置任何宿主的 token，token 全程经环境变量传入、不打印。
