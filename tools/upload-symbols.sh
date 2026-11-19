@@ -100,6 +100,7 @@ print("package size=%d sha256=%s files=%d" % (size, sha, len(files_to_zip)))
 ticket = post_json(endpoint + "/api/v1/uploads/tickets", {
     "business": "app_symbols", "platform": "ios", "release": release, "build": build,
     "kind": "flutter", "original_name": "flutter-symbols.zip", "file_size": size, "sha256": sha,
+    "uuids": [],  # Flutter AOT 符号无 LC_UUID；显式空数组与 iOS/Android 上传器保持一致
 })
 if not ticket.get("ok"): fail("ticket not ok: %s" % json.dumps(redact(ticket), ensure_ascii=False))
 upload_id, key, region, qtoken = ticket.get("upload_id"), ticket.get("key"), ticket.get("region"), ticket.get("token")
@@ -109,7 +110,8 @@ if not host: fail("未知七牛区域: %s（可用: %s）" % (region, ", ".join(
 print("ticket upload_id=%s region=%s host=%s" % (upload_id, region, host))
 
 # 2) 直传七牛：multipart，文件字节只经过本机 -> 七牛，不经过 cloud。显式检查 HTTP 状态。
-proc = subprocess.run(["curl", "-sS", "-w", "\n%{http_code}", "-X", "POST", host,
+# --connect-timeout / --max-time 防止上传卡死把发布机挂住（符号包大，max-time 留足）。
+proc = subprocess.run(["curl", "-sS", "--connect-timeout", "30", "--max-time", "600", "-w", "\n%{http_code}", "-X", "POST", host,
     "-F", "token=" + qtoken, "-F", "key=" + key, "-F", "file=@" + zip_path + ";type=application/zip"],
     capture_output=True, text=True)
 if proc.returncode != 0: fail("qiniu upload failed (network): " + proc.stderr)
@@ -125,6 +127,6 @@ if qres.get("error") or not qres.get("key"): fail("qiniu rejected upload: %s" % 
 print("qiniu upload ok")
 
 # 3) 确认：云端核验对象大小/SHA-256 后登记符号；Flutter AOT 符号无 LC_UUID，uuids 可空。
-confirm = post_json(endpoint + "/api/v1/uploads/" + str(upload_id) + "/confirm", {})
+confirm = post_json(endpoint + "/api/v1/uploads/" + str(upload_id) + "/confirm", {"uuids": []})
 if not confirm.get("ok"): fail("confirm rejected: %s" % json.dumps(redact(confirm), ensure_ascii=False))
 print("done: Flutter symbols uploaded and confirmed (upload_id=%s)" % upload_id)
