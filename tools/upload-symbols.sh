@@ -9,7 +9,17 @@
 #   流程: 1) POST /api/v1/uploads/tickets 取 upload_id/key/region/token
 #         2) multipart 直传七牛（文件本体不经 cloud）
 #         3) POST /api/v1/uploads/{upload_id}/confirm 核验落盘
-import json, os, sys, hashlib, tempfile, zipfile, subprocess, urllib.request
+import json, os, sys, shutil, atexit, hashlib, tempfile, zipfile, subprocess
+import urllib.request, urllib.error
+
+# 七牛区域 -> 直传域名：z0 无后缀，其余带区域后缀。未知区域直接报错，不拼错误域名。
+QINIU_UPLOAD_HOSTS = {
+    "z0": "https://upload.qiniup.com",
+    "z1": "https://upload-z1.qiniup.com",
+    "z2": "https://upload-z2.qiniup.com",
+    "na0": "https://upload-na0.qiniup.com",
+    "as0": "https://upload-as0.qiniup.com",
+}
 
 def fail(msg):
     print(msg, file=sys.stderr); sys.exit(1)
@@ -22,17 +32,29 @@ token = os.environ.get("MONITOR_TOKEN", "")
 if not token: fail("缺少 MONITOR_TOKEN")
 if not os.path.isdir(symbols_dir): fail("找不到符号目录: " + symbols_dir)
 
+# 依赖预检：缺命令以可读信息失败，而不是抛 traceback。
+for bin in ("curl",):
+    if shutil.which(bin) is None: fail("缺少命令: " + bin)
+
 def post_json(url, body_obj, extra_headers=None):
+    """POST JSON 并返回解析后的对象。区分网络错误与 HTTP 非 2xx，非 2xx 附带响应体。"""
     headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json", "Accept": "application/json"}
     if extra_headers: headers.update(extra_headers)
     req = urllib.request.Request(url, data=json.dumps(body_obj).encode(), headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        # 服务端拒绝：把状态码和响应体带出来，便于定位（token 权限/business 不匹配等）。
+        body = ""
+        try: body = e.read().decode()
+        except Exception: pass
+        fail("HTTP %s %s: %s" % (e.code, url, body))
     except Exception as e:
         fail("request failed: %s %s" % (url, e))
 
 tmp = tempfile.mkdtemp(prefix="moo-symbols-")
+atexit.register(shutil.rmtree, tmp, True)  # 无论成功/失败都清理 temp zip，避免发布机残留
 zip_path = os.path.join(tmp, "flutter-symbols.zip")
 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
     for root, _, files in os.walk(symbols_dir):
@@ -43,6 +65,7 @@ size = os.path.getsize(zip_path)
 sha = hashlib.sha256(open(zip_path, "rb").read()).hexdigest()
 print("package size=%d sha256=%s" % (size, sha))
 
+# 1) 签票据：cloud 登记元信息并签发七牛上传 token，不接收文件字节。
 ticket = post_json(endpoint + "/api/v1/uploads/tickets", {
     "business": "app_symbols", "platform": "ios", "release": release, "build": build,
     "kind": "flutter", "original_name": "flutter-symbols.zip", "file_size": size, "sha256": sha,
@@ -50,13 +73,27 @@ ticket = post_json(endpoint + "/api/v1/uploads/tickets", {
 if not ticket.get("ok"): fail("ticket not ok: %r" % ticket)
 upload_id, key, region, qtoken = ticket.get("upload_id"), ticket.get("key"), ticket.get("region"), ticket.get("token")
 if not all([upload_id, key, region, qtoken]): fail("ticket missing fields: %r" % ticket)
-host = "https://upload.qiniup.com" if region == "z0" else "https://upload-%s.qiniup.com" % region
-proc = subprocess.run(["curl", "-sS", "-X", "POST", host,
+host = QINIU_UPLOAD_HOSTS.get(region)
+if not host: fail("未知七牛区域: %s（可用: %s）" % (region, ", ".join(QINIU_UPLOAD_HOSTS)))
+print("ticket upload_id=%s region=%s host=%s" % (upload_id, region, host))
+
+# 2) 直传七牛：multipart，文件字节只经过本机 -> 七牛，不经过 cloud。显式检查 HTTP 状态。
+proc = subprocess.run(["curl", "-sS", "-w", "\n%{http_code}", "-X", "POST", host,
     "-F", "token=" + qtoken, "-F", "key=" + key, "-F", "file=@" + zip_path + ";type=application/zip"],
     capture_output=True, text=True)
-if proc.returncode != 0: fail("qiniu upload failed: " + proc.stderr)
-qres = json.loads(proc.stdout or "{}")
-if qres.get("error") or not qres.get("key"): fail("qiniu error: %r" % qres)
+if proc.returncode != 0: fail("qiniu upload failed (network): " + proc.stderr)
+# 最后一行是 -w 输出的 HTTP 状态码，前面是响应体。
+out = proc.stdout.rsplit("\n", 1)
+qbody, qhttp = (out[0], out[1].strip()) if len(out) == 2 else (proc.stdout, "")
+if qhttp != "200": fail("qiniu HTTP %s: %s" % (qhttp or "?", qbody))
+try:
+    qres = json.loads(qbody or "{}")
+except ValueError:
+    fail("qiniu non-JSON response: %s" % qbody)
+if qres.get("error") or not qres.get("key"): fail("qiniu rejected upload: %r" % qres)
+print("qiniu upload ok")
+
+# 3) 确认：云端核验对象大小/SHA-256 后登记符号；Flutter AOT 符号无 LC_UUID，uuids 可空。
 confirm = post_json(endpoint + "/api/v1/uploads/" + str(upload_id) + "/confirm", {})
 if not confirm.get("ok"): fail("confirm rejected: %r" % confirm)
 print("done: Flutter symbols uploaded and confirmed (upload_id=%s)" % upload_id)
