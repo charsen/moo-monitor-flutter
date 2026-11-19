@@ -25,7 +25,12 @@ QINIU_UPLOAD_HOSTS = {
 SENSITIVE_KEYS = ("token", "authorization", "secret", "password")
 
 def fail(msg):
+    # 运行期失败（网络/服务端/IO）：exit 1
     print(msg, file=sys.stderr); sys.exit(1)
+
+def usage_fail(msg):
+    # 用法/缺参类错误：exit 2（与 Android 上传器约定一致）
+    print(msg, file=sys.stderr); sys.exit(2)
 
 def redact(obj):
     """递归把响应里的 token 类字段替换为 ***，供错误信息打印使用。"""
@@ -44,15 +49,15 @@ def sha256_file(path, chunk=1 << 20):
     return h.hexdigest()
 
 if len(sys.argv) < 4:
-    fail("用法: MONITOR_TOKEN=<token> tools/upload-symbols.sh <symbols 目录> <release> <build> [endpoint]")
+    usage_fail("用法: MONITOR_TOKEN=<token> tools/upload-symbols.sh <symbols 目录> <release> <build> [endpoint]")
 symbols_dir, release, build = sys.argv[1], sys.argv[2], sys.argv[3]
 endpoint = (sys.argv[4] if len(sys.argv) > 4 else "https://c.mooeen.com").rstrip("/")
 token = os.environ.get("MONITOR_TOKEN", "")
-if not token: fail("缺少 MONITOR_TOKEN")
-if not os.path.isdir(symbols_dir): fail("找不到符号目录: " + symbols_dir)
+if not token: usage_fail("缺少 MONITOR_TOKEN")
+if not os.path.isdir(symbols_dir): usage_fail("找不到符号目录: " + symbols_dir)
 # release/build 是云端定位符号的键（release+build，与 context.symbol_id=<version+build> 对齐），必填。
-if not release: fail("缺少 release（营销版本号，如 0.0.3）")
-if not build: fail("缺少 build（构建号，如 14）")
+if not release: usage_fail("缺少 release（营销版本号，如 0.0.3）")
+if not build: usage_fail("缺少 build（构建号，如 14）")
 
 # 依赖预检：缺命令以可读信息失败，而不是抛 traceback。
 for bin in ("curl",):
